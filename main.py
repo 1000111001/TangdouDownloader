@@ -2,12 +2,63 @@ import os, sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import tangdou, time, requests, re
+import video_slice as slicer
 from moviepy.editor import *
 from headers import headers
 
-def downloader(name, url, path):
-    if not os.path.exists(path):
-        raise ValueError("'{}' does not exist".format(path))
+from concurrent.futures import ThreadPoolExecutor, as_completed
+# 用于显示进度条
+from tqdm import tqdm
+# 用于发起网络请求
+import requests
+
+def calc_divisional_range(filesize, chuck=10):
+    step = filesize//chuck
+    arr = list(range(0, filesize, step))
+    result = []
+    for i in range(len(arr)-1):
+        s_pos, e_pos = arr[i], arr[i+1]-1
+        result.append([s_pos, e_pos])
+    result[-1][-1] = filesize-1
+    return result
+
+def download_multi_thread(url: str, file_name: str, chunk: int) -> None:
+    # 先创建空文件
+    with open(file_name, "wb") as f:
+        pass
+
+    # header
+    header = headers(url).buildHeader()
+    response = requests.get(url, headers=header, stream=True)
+    content_size = int(response.headers['content-length'])  # Total download file size
+
+    # 下载方法
+    def range_download(save_name, s_pos, e_pos):
+        _headers = header.copy()
+        _headers['Range'] = f"bytes={s_pos}-{e_pos}"
+        res = requests.get(url, headers=_headers, stream=True)
+        with open(save_name, "rb+") as f:
+            f.seek(s_pos)
+            for chunk in res.iter_content(chunk_size=64*1024):
+                if chunk:
+                    f.write(chunk)
+                    bar.update(len(chunk))
+    
+    bar = tqdm(total=content_size, desc=f'下载文件：{file_name}')
+    divisional_ranges = calc_divisional_range(content_size, chuck=chunk)
+    start = time.time()     
+    with ThreadPoolExecutor() as p:
+        futures = []
+        for s_pos, e_pos in divisional_ranges:
+            # print(s_pos, e_pos)
+            futures.append(p.submit(range_download, file_name, s_pos, e_pos))
+        # 等待所有任务执行完毕
+        as_completed(futures)
+    end = time.time()
+    bar.close()
+    print('\r[%.2f s] Download completed, save to %s' % (end - start, os.path.abspath(file_name)))
+
+def download_single_thread(name, url, path):
     start = time.time()                                     # Download start
     header = headers(url).buildHeader()
     response = requests.get(url, headers=header, stream=True)
@@ -37,6 +88,14 @@ def downloader(name, url, path):
             raise OSError('Download error, {} does not exist'.format(filepath))
     else:
         raise RuntimeError('request error, error code:', response.status_code)
+
+def downloader(name, url, path):
+    if not os.path.exists(path):
+        raise ValueError("'{}' does not exist".format(path))
+
+    # Download succesful
+    filepath = path + '\\' + name + '.mp4'
+    download_multi_thread(url, filepath, 10)
 
 def time_check(time_str):
     '''convert time string to tuple and check its format
@@ -92,6 +151,13 @@ def main():
         downloader(**video_info)    # Unfold this dict to pass parameters
     
     video = VideoFileClip(filepath)
+    
+    slice_info = slicer.analysisVideo(video, video.fps)
+    auto_slice = input('自动分p（y/N）：')
+    if auto_slice == '' or auto_slice == 'n' or auto_slice == 'N':
+        pass
+    else:
+        slicer.doSlice(video, slice_info)
 
     while True:
         clip_start = input('剪辑起始时间(默认为不剪辑):')
@@ -128,7 +194,9 @@ def main():
     
 
     while True:
-        convert = input('是否转换为音频（y/n）:')
+        convert = input('是否转换为音频（y/N）:')
+        if (convert == ''):
+            break
         if convert == 'y' or convert == 'n':
             break
         print('输入有误，请重新输入！')
