@@ -15,7 +15,7 @@ def isSimilar(frame1, frame2):
     n1 = imagehash.average_hash(frame2) 
 
     # 阈值
-    cutoff = 8
+    cutoff = 12
 
     return abs(n0 - n1) < cutoff
 
@@ -48,7 +48,7 @@ def analysisVideo(clip, fps):
     for time in slice_points:
         prev = curr
         curr = time
-        if curr - prev < 5:
+        if curr - prev <= 6:
             continue
         s = str(datetime.timedelta(seconds=start)).zfill(8)
         e = str(datetime.timedelta(seconds=time)).zfill(8)
