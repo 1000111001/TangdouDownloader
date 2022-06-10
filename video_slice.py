@@ -1,4 +1,4 @@
-from cv2 import cv2 as cv2
+import cv2
 from PIL import Image
 import imagehash
 import datetime
